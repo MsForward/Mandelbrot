@@ -34,7 +34,8 @@ data segment
 
 data ends
 
-.386
+.286
+;.386
 .387
 assume ds:data, cs:code
 
@@ -43,8 +44,6 @@ code segment
 ;================================= MAIN ======================================;
 
 start:
-	mov dl, "b"
-	call printChar
 	call init
 	call getInput
 	call draw
@@ -143,7 +142,7 @@ start:
 			mov al, 0FFh
 
 		color:
-		;mov byte ptr es:[bx], al
+		mov byte ptr es:[bx], al
 		pop es
 		pop bx
 		pop ax
@@ -234,16 +233,16 @@ start:
 
 	VGAMode proc
 		push ax
-		mov ah, 13h
-		int 21h
+		mov ax, 13h
+		int 10h
 		pop ax
 		ret
 	VGAMode endp
 
 	textMode proc
 		push ax
-		mov ah, 03h
-		int 21h
+		mov ax, 03h
+		int 10h
 		pop ax
 		ret
 	textMode endp
@@ -254,14 +253,17 @@ start:
 		call println
 		call getNumber
 		fstp xMin
+		call crlf
 		mov dx, offset xMaxMessage
 		call println
 		call getNumber
 		fstp xMax
+		call crlf
 		mov dx, offset yMinMessage
 		call println
 		call getNumber
 		fstp yMin
+		call crlf
 		mov dx, offset yMaxMessage
 		call println
 		call getNumber
@@ -337,7 +339,8 @@ start:
 
 			fild TEN
 			fmul
-			mov dword ptr tmp, 0
+			mov word ptr tmp, 0
+			mov word ptr [tmp + 2], 0
 			mov byte ptr tmp, dl
 			fild tmp
 			fadd
@@ -349,6 +352,7 @@ start:
 			fcomp
 			fstsw ax
 			sahf
+			pop ax
 			jnz invalidDigit
 			mov dh, 1
 			jmp getDigit
@@ -383,7 +387,8 @@ start:
 			ja invalidDDigit
 
 			fild TENTH
-			mov dword ptr tmp, 0
+			mov word ptr tmp, 0
+			mov word ptr [tmp + 2], 0
 			mov byte ptr tmp, dl
 			fild tmp
 			fmul
@@ -603,7 +608,7 @@ start:
 code ends
 
 stacks segment stack
-			dw 1023 dup(?)
+			dw 255 dup(?)
 	top dw ?
 stacks ends
 
