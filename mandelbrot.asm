@@ -25,6 +25,7 @@ data segment
 	x 									dq ?
 	y 									dq ?
 	tmp									dq ?
+	tmpC								dw ?
 
 	xMinMessage					db "Enter minimum x value:", "$"
 	xMaxMessage					db "Enter maximum x value:", "$"
@@ -59,14 +60,17 @@ start:
 
 		call VGAMode
 
-		mov n, 0
-		mov m, 0
+		; coordinates for first pixel
+		mov word ptr n, 0
+		mov word ptr m, 0
 		drawLoop:
+			; check if x coordinate not out of bounds
 			mov ax, n
 			cmp ax, RES_X
 			jb contDraw
 			mov n, 0
 			inc m
+			; check for end of screen
 			mov ax, m
 			cmp ax, RES_Y
 			jae endDraw
@@ -74,8 +78,11 @@ start:
 		contDraw:			
 			call getPixelColor
 			inc n
+			jmp drawLoop
 
 		endDraw:
+		mov ah, 07h
+		int 21h
 
 		call textMode
 
@@ -84,53 +91,51 @@ start:
 	draw endp
 
 	getPixelColor proc
+		push ax
 		push cx
 		push dx
 
 		fldz
-		fistp x
+		fistp x ; x = 0
 		fldz
-		fistp y
+		fistp y ; y = 0
 
 		call getP
 		call getQ
 
-		mov cx, 1000d
+		mov cx, 1000d ; do 1000 iterations
 		calcPixel:
 			call getTmp
 			call getY
 			call getX
-			call checkResult
-			sahf
-			ja endCalcPixel
+			call checkResult ; AL = 1 if result OK
+			test al, al
+			jnz endCalcPixel
 			loop calcPixel
 
 		endCalcPixel:
-		test cx, cx
-		jz colorWhite
-		jmp colorBlack
+		mov dx, cx
+		call drawPixel
 
-		colorWhite:
-			mov dl, 1
-			call drawPixel
-
-		colorBlack:
-			xor dl, dl
-			call drawPixel
+		pop dx
+		pop cx
+		pop ax
 		ret
 	getPixelColor endp
 
 	drawPixel proc
-	; entry: DL = 1 - white, 0 - black
+	; entry: DX = 0 - black, DX > 0 - white
 		push ax
 		push bx
 		push es
 
-		mov ax, 0A000h
+		mov ax, 0A000h ; segment storing pixel color values
 		mov es, ax
-		call getPixelIndex
+		call getPixelIndex ; calculate pixel index from coordinates
+		; AX = pixel index
 		mov bx, ax
-		test dl, dl
+		; check if gone through all iterations
+		test dx, dx
 		jz black
 		jnz white
 
@@ -139,10 +144,10 @@ start:
 			jmp color
 
 		white: 
-			mov al, 0FFh
+			mov al, 0Fh
 
-		color:
-		mov byte ptr es:[bx], al
+		color: 
+			mov byte ptr es:[bx], al
 		pop es
 		pop bx
 		pop ax
@@ -156,20 +161,34 @@ start:
 		mov bx, ax
 		shl ax, 6 ; multiply by 64
 		shl bx, 8 ; multiply by 256
-		add ax, bx
+		add ax, bx ; AX = m*320
 		add ax, n
 		pop bx
 		ret
 	getPixelIndex endp
 
 	checkResult proc
+	; return: AL = 0 if result > MAX else AL = 1
+		push ax
 		fld x
-		fmul st, st
+		fmul st, st ; st = x*x
 		fld y
-		fmul st, st
-		fadd
+		fmul st, st ; st = y*y, st(1) = x*x
+		fadd ; st = x*x + y*y
 		fcomp MAX
-		fstsw ax
+		fstsw ax ; moves FPU flags to ax
+		sahf ; loads flags from ah
+		pop ax
+
+		; check if result > MAX
+		ja resultTooHigh
+		mov al, 1
+		jmp endCheckResult
+
+		resultTooHigh:
+			xor al, al
+
+		endCheckResult:
 		ret
 	checkResult endp
 
@@ -278,21 +297,27 @@ start:
 
 	getNumber proc
 		push ax
+		push cx
 		push dx
 		; promt for user input until number is correct
 		readInput:
 			; get integer part
 			call getInt
+			; check for errors
 			test ah, ah
 			jz numberInputError
 			; check if done
 			cmp al, 0Dh
-			je endReadInput
+			je finalizeInput
 
 			; get decimal part
 			call getDecimal
+			; check for errors
 			test ah, ah
 			jz numberInputError
+			; add integer and decimal part
+			fadd
+			jmp finalizeInput
 
 		numberInputError:
 			mov dx, offset errorMessage
@@ -303,9 +328,14 @@ start:
 			; try reading again
 			jmp readInput
 
-		endReadInput:
+		finalizeInput:
+		test cl, cl
+		jz endReadInput
+		fchs
 
+		endReadInput:
 		pop dx
+		pop cx
 		pop ax
 		ret
 	getNumber endp
@@ -317,55 +347,57 @@ start:
 ;-----------------------------------------------------------------------------;
 
 	getInt proc
-	; return: ST = integer, AL = last character entered, AH = 0 on failure
+	; return: ST = integer, AL = last character entered, AH = 0 on failure, CL = sign
 		push dx
 		fldz
 
 		getDigit:
+			; read character from stdin
 			mov ah, 01h
 			int 21h
-			mov ah, 1
+			; check if done
 			cmp al, 0Dh
 			je endGetInt
+			; check for decimal part
 			cmp al, "."
 			je endGetInt
+			; check if number negative
 			cmp al, "-"
 			je changeSign
 
+			; get digit from ASCII
 			mov dl, al
 			sub dl, 30h
+			; check if valid digit
 			cmp dl, 9
 			ja invalidDigit
 
+			; multiply current value by ten
 			fild TEN
 			fmul
-			mov word ptr tmp, 0
-			mov word ptr [tmp + 2], 0
-			mov byte ptr tmp, dl
-			fild tmp
+			mov byte ptr tmpC, dl
+			; add digit to current value
+			fild tmpC
 			fadd
 			jmp getDigit
 
 		changeSign:
+			; check if any characters have been entered 
 			push ax
-			fldz
-			fcomp
+			ftst
 			fstsw ax
 			sahf
 			pop ax
+			; if not zero ten digit not valid
 			jnz invalidDigit
-			mov dh, 1
+			; remember to change sign
+			mov cl, 1
 			jmp getDigit
 
 		invalidDigit:
 			xor ah, ah
 
 		endGetInt:
-		cmp dh, 1
-		jne saveInt
-		fchs
-
-		saveInt:
 		pop dx
 		ret
 	getInt endp
@@ -373,31 +405,38 @@ start:
 	getDecimal proc
 	; return: ST = decimal, AL = last character entered, AH = 0 on failure
 		push dx
+		fld TENTH
+		fldz
 
-		getDDigit:
+		getDecimalDigit:
+			; read character from stdin
 			mov ah, 01h
 			int 21h
-			mov ah, 1
+			; check if done
 			cmp al, 0Dh
 			je endGetDecimal
 
+			; convert ASCII to digit
 			mov dl, al
 			sub dl, 30h
+			; check if digit is valid
 			cmp dl, 9
-			ja invalidDDigit
+			ja invalidDecimalDigit
 
-			fild TENTH
-			mov word ptr tmp, 0
-			mov word ptr [tmp + 2], 0
-			mov byte ptr tmp, dl
-			fild tmp
-			fmul
+			mov byte ptr tmpC, dl
+			fild tmpC
+			fmul st, st(2)
 			fadd
-			jmp getDDigit
+			fld TENTH
+			fmulp st(2), st
+			jmp getDecimalDigit
 
-		invalidDDigit:
+		invalidDecimalDigit:
 			xor ah, ah
 		endGetDecimal:
+		fxch st(1)
+		fistp tmpC
+
 		pop dx
 		ret	
 	getDecimal endp
@@ -544,7 +583,7 @@ start:
     ret
   println endp
 
-  print proc ; writes string in DS:DX to console
+  print proc ; writes string in DS:DX to consol
   ; entry: DX = string offset
   	push ax
   	mov ah, 9h
@@ -561,6 +600,50 @@ start:
     pop ax
     ret
   printChar endp
+
+  printInteger proc
+  ; entry: DX = number
+  	push ax
+  	push dx
+
+	  mov ax, dx
+  	printDigit:
+	  	mov dl, 10d
+	  	div dl
+	  	mov dl, ah
+	  	add dl, 30h
+	  	call printChar
+	  	xor ah, ah
+	  	test al, al
+	  	jnz printDigit
+
+  	pop dx
+  	pop ax
+  	ret
+  printInteger endp
+
+  printFloat proc
+  ; entry: ST = number
+  	push cx
+  	push dx
+
+  	mov cx, 5
+  	printFloatLoop:
+	  	fist tmpC
+	  	fild tmpC
+	  	mov dl, byte ptr tmpC
+	  	add dl, 30h
+	  	call printChar
+	  	fsub
+	  	fild TEN
+	  	fmul
+
+	  loop printFloatLoop
+
+  	pop dx
+  	pop cx
+  	ret
+  printFloat endp
     
   crlf proc ; prints line break 
     push ax
@@ -587,7 +670,7 @@ start:
     ; initialize stack
     mov ax, seg top
     mov ss, ax
-    mov sp, offset top
+    mov sp, ds:[top]
 
     ; clear arithmetic registers
     xor ax, ax
@@ -595,7 +678,7 @@ start:
     xor cx, cx
     xor dx, dx
 
-    finit
+    fninit
     cld
     ret
   init endp
