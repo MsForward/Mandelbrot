@@ -33,6 +33,9 @@ data segment
 	yMaxMessage					db "Enter maximum y value:", "$"
 	errorMessage				db "Not a valid number!", "$"
 
+	argNumError					db "Wrong number of arguments. Usage: mandelbrot xmin xmax ymin ymax", "$"
+	invalidCharacterError	db "You entered some funky data! All arguments must be numbers: eg. 1.234", "$"
+
 data ends
 .286
 ;.386
@@ -290,10 +293,6 @@ start:
 		ret
 	getInput endp
 
-;-------------------------------GET NUMBER------------------------------------;
-; Reads one number from console ----------------------------------------------;
-;-----------------------------------------------------------------------------;
-
 	getNumber proc
 		push ax
 		push cx
@@ -338,12 +337,6 @@ start:
 		pop ax
 		ret
 	getNumber endp
-
-;-----------------------------------------------------------------------------;
-
-;--------------------------------- GET INT -----------------------------------;
-; Reads integer from console -------------------------------------------------;
-;-----------------------------------------------------------------------------;
 
 	getInt proc
 	; return: ST = integer, AL = last character entered, AH = 0 on failure, CL = sign
@@ -440,6 +433,101 @@ start:
 		ret	
 	getDecimal endp
 	
+	;checkArgs proc
+;		push ax
+;		push cx
+;		push dx
+;		push si
+;		push di;
+
+;		cmp argNum, 4
+;		jne wrongArgNum;
+
+;		mov di, offset yMax
+;		xor dh, dh
+;		xor ch, ch
+;		mov cl, argNum;
+
+;		mov dl, cl
+;		dec dl
+;		call getArg
+;		lodsb
+;		mov al, ds:[si]
+;		cmp al, "-"
+;		je changeSign;
+
+;		fldz;
+
+;		covertArgLoop:
+;			convertIntLoop:
+;				cmp al, "."
+;				je convertDecimal
+;				sub al, 30h
+;				cmp al, 9
+;				ja wrongCharacter
+;				fild TEN
+;				fmul
+;				mov word ptr tmpC, 0
+;				mov byte ptr tmpC, al
+;				fild tmpC
+;				fadd
+;				lodsb
+;				cmp al, "$"
+;				jne convertIntLoop
+;				jmp cnvaLoop;
+
+;			convertDecimal:
+;				fild TENTH
+;				lodsb
+;				convertDecimalLoop:
+;					sub al, 30h
+;					cmp al, 9
+;					ja wrongCharacter
+;					mov word ptr tmpC, 0
+;					mov byte ptr tmpC, al
+;					fild tmpC
+;					fmul st, st(1)
+;					faddp st(2), st
+;					fild TENTH
+;					fmul
+;					lodsb
+;					cmp al, "$"
+;					jne convertDecimalLoop
+;					fstp tmp;
+
+;			cnvaLoop:
+;				cmp dh, 1
+;				jne contCnvaLoop
+;				fchs
+;			contCnvaLoop:
+;				fstp ds:[di]
+;				sub di, 4
+;				mov dl, cl
+;				dec dl
+;				call getArg
+;				mov si, ax	
+;			loop convertArgLoop;
+
+;		changeSign:
+;			mov dh, 1
+;			jmp convertArgLoop;
+
+;		wrongArgNum:
+;			mov dx, offset argNumError
+;			call printError;
+
+;		wrongCharacter:
+;			mov dx, offset invalidCharacterError
+;			call printError;
+
+;		endCheckArgs:
+;		pop di
+;		pop si
+;		pop dx
+;		pop cx
+;		pop ax
+;	checkArgs endp
+
 	parseArgs proc
     pusha
     push es
@@ -567,10 +655,7 @@ start:
 	getArg endp
 
 	printError proc ; writes error to console and exits program
-	; entry: DX = error number
-		mov bx, dx
-		shl bx, 1
-		;mov dx, [errorPtr + bx]
+	; entry: DX = error offset
 		call println
 		call exit
 	printError endp
@@ -669,7 +754,7 @@ start:
     ; initialize stack
     mov ax, seg top
     mov ss, ax
-    mov sp, ds:[top]
+    mov sp, offset top
 
     ; clear arithmetic registers
     xor ax, ax
