@@ -33,7 +33,6 @@ data segment
 	errorMessage				db "Not a valid number!", "$"
 
 data ends
-
 .286
 ;.386
 .387
